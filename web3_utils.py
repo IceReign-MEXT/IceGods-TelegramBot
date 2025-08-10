@@ -12,8 +12,8 @@ def get_eth_balance(address):
     if not w3:
         return None
     try:
-        balance_wei = w3.eth.get_balance(address)
-        return float(w3.fromWei(balance_wei, "ether"))
+        balance = w3.eth.get_balance(address)
+        return float(w3.fromWei(balance, "ether"))
     except Exception:
         return None
 
@@ -22,11 +22,7 @@ def get_solana_balance(address):
         return None
     try:
         resp = sol_client.get_balance(address)
-        # solana-py returns {"result": {"context":..., "value": 123}} structure
-        if resp and resp.get("result"):
-            val = resp["result"].get("value") if isinstance(resp["result"], dict) else None
-            if val is not None:
-                return val / 1e9
-        return None
+        val = resp.get("result", {}).get("value") if resp else None
+        return val / 1e9 if val else None
     except Exception:
         return None
