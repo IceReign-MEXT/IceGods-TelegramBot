@@ -5,8 +5,17 @@ __pycache__/
 *.pyd
 *.db
 
-# Environment
-.env
+# Virtual environment
+venv/
+.env/
+.env.*
+
+# Logs
+*.log
 
 # Docker
-*.log
+*.pid
+
+# IDE
+.vscode/
+.idea/
