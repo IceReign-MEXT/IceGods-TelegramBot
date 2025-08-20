@@ -1,28 +1,36 @@
+import time
 import os
-from web3 import Web3
-from solana.rpc.api import Client as SolanaClient
+from dotenv import load_dotenv
+from telegram import Bot
+from models import SessionLocal, Watch
+from web3_utils import get_eth_balance, get_solana_balance
 
-ETH_RPC = os.environ.get("ETHEREUM_RPC")
-SOL_RPC = os.environ.get("SOLANA_RPC")
+load_dotenv()
 
-w3 = Web3(Web3.HTTPProvider(ETH_RPC)) if ETH_RPC else None
-sol_client = SolanaClient(SOL_RPC) if SOL_RPC else None
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-def get_eth_balance(address):
-    if not w3:
-        return None
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", 60))
+
+def check_watches():
+    db = SessionLocal()
     try:
-        balance = w3.eth.get_balance(address)
-        return float(w3.fromWei(balance, "ether"))
-    except Exception:
-        return None
+        watches = db.query(Watch).all()
+        for w in watches:
+            if w.target.startswith("0x"):  # Ethereum
+                bal = get_eth_balance(w.target)
+            else:  # Assume Solana
+                bal = get_solana_balance(w.target)
+            
+            if bal is not None:
+                bot.send_message(
+                    chat_id=w.user.telegram_id,
+                    text=f"Watched address {w.target} balance: {bal}"
+                )
+    finally:
+        db.close()
 
-def get_solana_balance(address):
-    if not sol_client:
-        return None
-    try:
-        resp = sol_client.get_balance(address)
-        val = resp.get("result", {}).get("value") if resp else None
-        return val / 1e9 if val else None
-    except Exception:
-        return None
+if __name__ == "__main__":
+    while True:
+        check_watches()
+        time.sleep(POLL_INTERVAL)
