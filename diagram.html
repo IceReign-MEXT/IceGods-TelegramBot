@@ -1,41 +1,135 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>ChainPilot-TelegramBot Architecture</title>
-<style>
-  body { font-family: Arial, sans-serif; background: #f9f9f9; }
-  .node { border: 2px solid #4CAF50; padding: 10px; margin: 10px; display: inline-block; border-radius: 10px; background: #e8f5e9; text-align: center; }
-  .arrow { font-size: 24px; margin: 0 10px; }
-  a { text-decoration: none; color: #2E7D32; font-weight: bold; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChainPilot Subscription Plans</title>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      background: #0a0a0a;
+      color: #f0f0f0;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background: linear-gradient(90deg, #0f2027, #203a43, #2c5364);
+      text-align: center;
+      padding: 2rem 0;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 2.5rem;
+      color: #fff;
+    }
+    .container {
+      max-width: 1100px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+    .pricing {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 2rem;
+      margin-top: 2rem;
+    }
+    .plan {
+      background: #1f1f1f;
+      border: 2px solid #333;
+      border-radius: 15px;
+      padding: 1.5rem;
+      text-align: center;
+      transition: transform 0.2s ease;
+    }
+    .plan:hover {
+      transform: scale(1.05);
+      border-color: #00d8ff;
+    }
+    .plan h2 {
+      margin-top: 0;
+      font-size: 1.5rem;
+      color: #00d8ff;
+    }
+    .plan p {
+      font-size: 1.2rem;
+      margin: 1rem 0;
+    }
+    .plan button {
+      background: #00d8ff;
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      padding: 0.75rem 1.5rem;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    .plan button:hover {
+      background: #00b8cc;
+    }
+    footer {
+      margin-top: 3rem;
+      text-align: center;
+      padding: 2rem 0;
+      background: #111;
+      font-size: 0.9rem;
+      color: #888;
+    }
+  </style>
 </head>
 <body>
-<h2>ChainPilot-TelegramBot Architecture</h2>
+  <header>
+    <h1>ChainPilot Premium Subscription</h1>
+    <p>Complete automation for your Telegram trading bot.</p>
+  </header>
 
-<div class="node"><a href="#">Telegram Bot</a></div>
-<span class="arrow">&#8594;</span>
-<div class="node"><a href="#">Flask API (app.py)</a></div>
-<span class="arrow">&#8594;</span>
-<div class="node"><a href="#">SQLite Database</a></div>
+  <div class="container">
+    <div class="pricing">
+      <div class="plan">
+        <h2>1 Hour</h2>
+        <p>💎 $1</p>
+        <button onclick="alert('Send payment to: 0x08D171685e51bAf7a929cE8945CF25b3D1Ac9756')">Subscribe</button>
+      </div>
+      <div class="plan">
+        <h2>4 Hours</h2>
+        <p>💎 $3</p>
+        <button onclick="alert('Send payment to: 0x08D171685e51bAf7a929cE8945CF25b3D1Ac9756')">Subscribe</button>
+      </div>
+      <div class="plan">
+        <h2>8 Hours</h2>
+        <p>💎 $5</p>
+        <button onclick="alert('Send payment to: 0x08D171685e51bAf7a929cE8945CF25b3D1Ac9756')">Subscribe</button>
+      </div>
+      <div class="plan">
+        <h2>12 Hours</h2>
+        <p>💎 $7</p>
+        <button onclick="alert('Send payment to: 0x08D171685e51bAf7a929cE8945CF25b3D1Ac9756')">Subscribe</button>
+      </div>
+      <div class="plan">
+        <h2>24 Hours</h2>
+        <p>💎 $10</p>
+        <button onclick="alert('Send payment to: 0x08D171685e51bAf7a929cE8945CF25b3D1Ac9756')">Subscribe</button>
+      </div>
+      <div class="plan">
+        <h2>1 Week</h2>
+        <p>💎 $25</p>
+        <button onclick="alert('Send payment to: 0x08D171685e51bAf7a929cE8945CF25b3D1Ac9756')">Subscribe</button>
+      </div>
+      <div class="plan">
+        <h2>1 Month</h2>
+        <p>💎 $80</p>
+        <button onclick="alert('Send payment to: 0x08D171685e51bAf7a929cE8945CF25b3D1Ac9756')">Subscribe</button>
+      </div>
+      <div class="plan">
+        <h2>1 Year</h2>
+        <p>💎 $800</p>
+        <button onclick="alert('Send payment to: 0x08D171685e51bAf7a929cE8945CF25b3D1Ac9756')">Subscribe</button>
+      </div>
+    </div>
+  </div>
 
-<br><br>
-
-<div class="node"><a href="#">Ethereum RPC (Infura)</a></div>
-<span class="arrow">&#8594;</span>
-<div class="node"><a href="#">web3_utils.py / watch_scanner.py</a></div>
-
-<br><br>
-
-<div class="node"><a href="#">Solana RPC</a></div>
-<span class="arrow">&#8594;</span>
-<div class="node"><a href="#">web3_utils.py / watch_scanner.py</a></div>
-
-<br><br>
-
-<div class="node"><a href="#">Docker / venv</a></div>
-<span class="arrow">&#8594;</span>
-<div class="node"><a href="#">AWS / Railway Hosting</a></div>
-
+  <footer>
+    &copy; 2025 ChainPilot. All rights reserved.
+  </footer>
 </body>
 </html>
