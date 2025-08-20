@@ -1,7 +1,16 @@
-# ChainPilot - Telegram Web3 Bot
+# ChainPilot Telegram Bot
 
-## Quick Start
-1. Copy `.env.example` → `.env` and fill your secrets.
-2. Install:
+A Telegram bot that lets you:
+- Connect Ethereum and Solana wallets
+- Check balances
+- Add watch alerts for wallets
+- Get notified when balances change
+
+---
+
+## ⚙️ Setup
+
+1. Clone the repo:
    ```bash
-   pip install -r requirements.txt
+   git clone https://github.com/yourusername/ChainPilot-TelegramBot.git
+   cd ChainPilot-TelegramBot
