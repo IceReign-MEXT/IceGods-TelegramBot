@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ChainPilot-TelegramBot Architecture</title>
+<style>
+  body { font-family: Arial, sans-serif; background: #f9f9f9; }
+  .node { border: 2px solid #4CAF50; padding: 10px; margin: 10px; display: inline-block; border-radius: 10px; background: #e8f5e9; text-align: center; }
+  .arrow { font-size: 24px; margin: 0 10px; }
+  a { text-decoration: none; color: #2E7D32; font-weight: bold; }
+</style>
+</head>
+<body>
+<h2>ChainPilot-TelegramBot Architecture</h2>
+
+<div class="node"><a href="#">Telegram Bot</a></div>
+<span class="arrow">&#8594;</span>
+<div class="node"><a href="#">Flask API (app.py)</a></div>
+<span class="arrow">&#8594;</span>
+<div class="node"><a href="#">SQLite Database</a></div>
+
+<br><br>
+
+<div class="node"><a href="#">Ethereum RPC (Infura)</a></div>
+<span class="arrow">&#8594;</span>
+<div class="node"><a href="#">web3_utils.py / watch_scanner.py</a></div>
+
+<br><br>
+
+<div class="node"><a href="#">Solana RPC</a></div>
+<span class="arrow">&#8594;</span>
+<div class="node"><a href="#">web3_utils.py / watch_scanner.py</a></div>
+
+<br><br>
+
+<div class="node"><a href="#">Docker / venv</a></div>
+<span class="arrow">&#8594;</span>
+<div class="node"><a href="#">AWS / Railway Hosting</a></div>
+
+</body>
+</html>
