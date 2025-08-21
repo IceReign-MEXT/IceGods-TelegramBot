@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChainPilot Dashboard</title>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      background: #0a0a0a;
+      color: #f0f0f0;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background: linear-gradient(90deg, #0f2027, #203a43, #2c5364);
+      text-align: center;
+      padding: 2rem 0;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 2.5rem;
+      color: #fff;
+    }
+    .container {
+      max-width: 1100px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 2rem;
+    }
+    th, td {
+      padding: 1rem;
+      border-bottom: 1px solid #333;
+      text-align: left;
+    }
+    th {
+      background: #1f1f1f;
+      color: #00d8ff;
+    }
+    td {
+      background: #2a2a2a;
+    }
+    footer {
+      margin-top: 3rem;
+      text-align: center;
+      padding: 2rem 0;
+      background: #111;
+      font-size: 0.9rem;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ChainPilot Wallet Dashboard</h1>
+  </header>
+
+  <div class="container">
+    <table>
+      <thead>
+        <tr>
+          <th>Wallet Address</th>
+          <th>ETH Balance</th>
+          <th>Last Updated</th>
+        </tr>
+      </thead>
+      <tbody id="wallet-data">
+        <!-- Wallet rows will be injected here -->
+      </tbody>
+    </table>
+  </div>
+
+  <footer>
+    &copy; 2025 ChainPilot. All rights reserved.
+  </footer>
+
+  <script>
+    async function fetchBalances() {
+      const response = await fetch('/wallets');
+      const data = await response.json();
+      const tbody = document.getElementById('wallet-data');
+      tbody.innerHTML = '';
+      data.forEach(wallet => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${wallet.address}</td>
+          <td>${wallet.balance} ETH</td>
+          <td>${wallet.last_updated}</td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    setInterval(fetchBalances, 60000);
+    fetchBalances();
+  </script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+Flask==3.1.2
+python-telegram-bot==20.3
+SQLAlchemy==1.4.49
+web3==6.0.0
+solana==0.36.9
+python-dotenv==1.1.1
+gunicorn==23.0.0
+requests==2.32.5
