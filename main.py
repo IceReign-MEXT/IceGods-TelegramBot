@@ -1,263 +1,330 @@
-# main.py
+#!/usr/bin/env python3
 import os
-import time
-import re
 import sqlite3
-from datetime import timedelta
+import time
+import logging
+import asyncio
+from datetime import datetime, timezone
+from typing import Optional, Dict
 
+import requests
 from dotenv import load_dotenv
 from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-# ========= ENV =========
+# -------------------------
+# Config & Logging
+# -------------------------
 load_dotenv()
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+logging.basicConfig(level=getattr(logging, LOG_LEVEL))
+log = logging.getLogger("icegod")
 
-ETH_MAIN_WALLET = os.getenv("ETH_MAIN_WALLET", "").strip()
-SOL_MAIN_WALLET = os.getenv("SOL_MAIN_WALLET", "").strip()
-ETH_BACKUP_WALLET = os.getenv("ETH_BACKUP_WALLET", "").strip()
-SOL_BACKUP_WALLET = os.getenv("SOL_BACKUP_WALLET", "").strip()
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+OWNER_ID = int(os.getenv("OWNER_ID", "0").strip() or 0)
+SUBSCRIPTION_WALLET = os.getenv("SUBSCRIPTION_WALLET", "").strip()  # receiving wallet (public)
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "").strip()
+USDT_CONTRACT = os.getenv("USDT_CONTRACT", "0xdAC17F958D2ee523a2206206994597C13D831ec7").strip()
+DB_PATH = os.getenv("DB_PATH", "subscriptions.db")
+COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY", "").strip()
 
-# Optional but recommended
-APP_NAME = os.getenv("APP_NAME", "ChainPilot Bot").strip()
-BOT_HANDLE = os.getenv("BOT_HANDLE", "@Ice_ChainPilot_bot").strip()
+if not BOT_TOKEN:
+    raise SystemExit("BOT_TOKEN missing in .env")
+if not SUBSCRIPTION_WALLET:
+    raise SystemExit("SUBSCRIPTION_WALLET missing in .env")
+if not ETHERSCAN_API_KEY:
+    raise SystemExit("ETHERSCAN_API_KEY missing in .env")
 
-# ========= PRICING / PLANS =========
-# Change these anytime — they display in /plans and are used by /subscribe
+# Pricing
 PLANS = {
-    "1_hour":   {"seconds": 1 * 60 * 60,      "price": "$1"},
-    "4_hours":  {"seconds": 4 * 60 * 60,      "price": "$3"},
-    "8_hours":  {"seconds": 8 * 60 * 60,      "price": "$5"},
-    "12_hours": {"seconds": 12 * 60 * 60,     "price": "$7"},
-    "24_hours": {"seconds": 24 * 60 * 60,     "price": "$10"},
-    "1_week":   {"seconds": 7 * 24 * 60 * 60, "price": "$29"},
-    "1_month":  {"seconds": 30 * 24 * 60 * 60,"price": "$79"},
-    "1_year":   {"seconds": 365 * 24 * 60 * 60,"price": "$699"},
+    "12h":  {"usd": 10,  "hours": 12},
+    "24h":  {"usd": 15,  "hours": 24},
+    "week": {"usd": 25,  "hours": 7 * 24},
+    "month":{"usd": 80,  "hours": 30 * 24},
+    "year": {"usd": 300, "hours": 365 * 24},
 }
 
-PRICE_BANNER = (
-    "🛡️ ChainPilot — Pro Plans\n"
-    "────────────────────────\n"
-    "⏱️ 1 Hour  → $1\n"
-    "⏱️ 4 Hours → $3\n"
-    "⏱️ 8 Hours → $5\n"
-    "⏱️ 12 Hrs  → $7\n"
-    "📅 24 Hrs  → $10\n"
-    "📅 1 Week  → $29\n"
-    "📅 1 Month → $79\n"
-    "📆 1 Year  → $699\n"
-    "────────────────────────\n"
-    "Pay to the wallets below, then /subscribe <plan> and /status\n"
-)
+# -------------------------
+# Database helpers
+# -------------------------
+def db_conn():
+    return sqlite3.connect(DB_PATH, check_same_thread=False)
 
-# ========= DB =========
-DB_PATH = os.getenv("DATABASE_URL", "sqlite:///chainpilot.db")
-# Normalize to local file if needed
-if DB_PATH.startswith("sqlite:///"):
-    DB_FILE = DB_PATH.replace("sqlite:///", "")
-else:
-    DB_FILE = "chainpilot.db"
+def db_init():
+    with db_conn() as con:
+        cur = con.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                wallet TEXT,
+                plan TEXT,
+                expires_at INTEGER DEFAULT 0
+            )""")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS payments (
+                txhash TEXT PRIMARY KEY,
+                user_id INTEGER,
+                plan TEXT,
+                amount_usd REAL,
+                currency TEXT,
+                created_at INTEGER,
+                valid INTEGER
+            )""")
+        con.commit()
 
-conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-cur = conn.cursor()
-cur.execute(
-    """
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        telegram_id TEXT UNIQUE,
-        wallet_address TEXT,
-        chain TEXT,
-        plan TEXT,
-        start_time INTEGER
-    )
-    """
-)
-conn.commit()
+def set_user_wallet(user_id: int, username: str, wallet: str):
+    with db_conn() as con:
+        cur = con.cursor()
+        cur.execute("INSERT OR IGNORE INTO users(user_id, username, wallet, plan, expires_at) VALUES(?,?,?,?,?)",
+                    (user_id, username, wallet, None, 0))
+        cur.execute("UPDATE users SET username=?, wallet=? WHERE user_id=?",
+                    (username, wallet, user_id))
+        con.commit()
 
-# ========= HELPERS =========
-def is_valid_eth_address(addr: str) -> bool:
-    # 0x + 40 hex chars
-    return bool(re.fullmatch(r"0x[a-fA-F0-9]{40}", addr or ""))
+def activate_subscription(user_id: int, username: str, plan: str):
+    hours = PLANS[plan]["hours"]
+    now = int(time.time())
+    expires_at = now + hours * 3600
+    with db_conn() as con:
+        cur = con.cursor()
+        cur.execute("INSERT OR IGNORE INTO users(user_id, username, wallet, plan, expires_at) VALUES(?,?,?,?,?)",
+                    (user_id, username, None, plan, expires_at))
+        cur.execute("UPDATE users SET username=?, plan=?, expires_at=? WHERE user_id=?",
+                    (username, plan, expires_at, user_id))
+        con.commit()
+    return expires_at
 
-_BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+def get_user(user_id: int) -> Optional[Dict]:
+    with db_conn() as con:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
 
-def is_valid_solana_address(addr: str) -> bool:
-    if not addr:
+def record_payment(txhash: str, user_id: int, plan: str, usd: float, currency: str, valid: int):
+    with db_conn() as con:
+        cur = con.cursor()
+        cur.execute("""
+            INSERT OR REPLACE INTO payments(txhash, user_id, plan, amount_usd, currency, created_at, valid)
+            VALUES(?,?,?,?,?,?,?)
+        """, (txhash, user_id, plan, usd, currency, int(time.time()), valid))
+        con.commit()
+
+# -------------------------
+# Etherscan helpers
+# -------------------------
+ETHERSCAN_API = "https://api.etherscan.io/api"
+
+def etherscan_request(params: dict):
+    p = params.copy()
+    p["apikey"] = ETHERSCAN_API_KEY
+    r = requests.get(ETHERSCAN_API, params=p, timeout=18)
+    r.raise_for_status()
+    return r.json()
+
+def check_tx_receipt(txhash: str) -> bool:
+    # getTransactionReceipt via proxy
+    j = etherscan_request({"module": "proxy", "action": "eth_getTransactionReceipt", "txhash": txhash})
+    res = j.get("result")
+    if not res:
         return False
-    if not (32 <= len(addr) <= 44):
-        return False
-    for ch in addr:
-        if ch not in _BASE58:
-            return False
-    return True
+    status = res.get("status")
+    # status "0x1" => success
+    return status == "0x1"
 
-def now_ts() -> int:
-    return int(time.time())
+def get_tx(txhash: str):
+    j = etherscan_request({"module": "proxy", "action": "eth_getTransactionByHash", "txhash": txhash})
+    return j.get("result") or {}
 
-def is_active(start_time: int | None, plan: str | None) -> bool:
-    if not start_time or not plan or plan not in PLANS:
-        return False
-    duration = PLANS[plan]["seconds"]
-    return now_ts() - start_time < duration
+def find_usdt_transfer_to_wallet(txhash: str, wallet: str) -> Optional[int]:
+    # fetch token transfers for wallet and search for txhash
+    j = etherscan_request({"module": "account", "action": "tokentx", "address": wallet, "page":1, "offset":100, "sort":"desc", "contractaddress": USDT_CONTRACT})
+    if j.get("status") != "1":
+        return None
+    for it in j.get("result", []):
+        if it.get("hash","").lower() == txhash.lower() and it.get("to","").lower() == wallet.lower():
+            try:
+                return int(it.get("value", "0"))
+            except:
+                return None
+    return None
 
-def remaining_time(start_time: int | None, plan: str | None) -> str:
-    if not start_time or not plan or plan not in PLANS:
-        return "No active subscription."
-    end_ts = start_time + PLANS[plan]["seconds"]
-    remaining = max(0, end_ts - now_ts())
-    return str(timedelta(seconds=remaining))
+def get_eth_price_usd() -> float:
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price"
+        params = {"ids":"ethereum","vs_currencies":"usd"}
+        headers = {}
+        if COINGECKO_API_KEY:
+            headers["x-cg-pro-api-key"] = COINGECKO_API_KEY
+        r = requests.get(url, params=params, headers=headers, timeout=10)
+        r.raise_for_status()
+        return float(r.json()["ethereum"]["usd"])
+    except Exception as e:
+        log.warning("Coingecko failed, fallback to 3000 USD: %s", e)
+        return 3000.0
 
-def get_user_row(tg_id: str):
-    cur.execute("SELECT telegram_id, wallet_address, chain, plan, start_time FROM users WHERE telegram_id=?",(tg_id,))
-    return cur.fetchone()
+def usd_to_min_wei(usd: float) -> int:
+    eth_price = get_eth_price_usd()
+    eth_amount = (usd / eth_price) * 1.02  # 2% buffer
+    return int(eth_amount * 10**18)
 
-def upsert_user(tg_id: str, **fields):
-    row = get_user_row(tg_id)
-    if row is None:
-        cur.execute("INSERT INTO users (telegram_id) VALUES (?)", (tg_id,))
-        conn.commit()
-    # build update
-    cols, vals = [], []
-    for k, v in fields.items():
-        cols.append(f"{k}=?")
-        vals.append(v)
-    if cols:
-        vals.append(tg_id)
-        cur.execute(f"UPDATE users SET {', '.join(cols)} WHERE telegram_id=?", tuple(vals))
-        conn.commit()
+def verify_payment(txhash: str, plan_key: str, wallet: str):
+    # returns tuple: (ok:bool, currency:str, message:str, amount_usd:float)
+    if plan_key not in PLANS:
+        return False, "N/A", "Unknown plan", 0.0
 
-# ========= COMMANDS =========
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = (
-        f"👋 Welcome to {APP_NAME} {BOT_HANDLE}\n\n"
-        "I can help you manage subscriptions and link your wallet.\n\n"
-        "Commands:\n"
-        "• /help – Show help\n"
-        "• /plans – View plans & prices\n"
-        "• /address – Where to pay\n"
-        "• /link <wallet> – Link ETH or Solana wallet\n"
-        "• /unlink – Remove linked wallet\n"
-        "• /subscribe <plan> – Start a plan (records time)\n"
-        "• /status – Check your plan & time remaining\n"
-    )
-    await update.message.reply_text(msg)
+    if not check_tx_receipt(txhash):
+        return False, "N/A", "Transaction receipt not ready or failed", 0.0
 
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await start(update, context)
+    tx = get_tx(txhash)
+    value_hex = tx.get("value", "0x0")
+    try:
+        value_wei = int(value_hex, 16)
+    except:
+        value_wei = 0
+    to_addr = (tx.get("to") or "").lower()
 
-async def plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # build from PLANS
-    lines = ["📋 Available Plans:"]
-    for key, cfg in PLANS.items():
-        seconds = cfg["seconds"]
-        price = cfg["price"]
-        if seconds % (24*3600) == 0:
-            dur = f"{seconds // (24*3600)}d"
-        elif seconds % 3600 == 0:
-            dur = f"{seconds // 3600}h"
+    # Direct ETH payment
+    if to_addr == wallet.lower() and value_wei > 0:
+        required_wei = usd_to_min_wei(PLANS[plan_key]["usd"])
+        if value_wei >= required_wei:
+            paid_eth = value_wei / 1e18
+            amount_usd = paid_eth * get_eth_price_usd()
+            return True, "ETH", f"ETH payment detected ({paid_eth:.6f} ETH)", float(amount_usd)
         else:
-            dur = f"{seconds // 60}m"
-        lines.append(f"• {key} ({dur}) → {price}")
-    lines.append("\n" + PRICE_BANNER)
-    await update.message.reply_text("\n".join(lines))
+            return False, "ETH", "ETH amount below required plan price", 0.0
 
-async def address(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    parts = ["💳 Payment Addresses:"]
-    if ETH_MAIN_WALLET:
-        parts.append(f"• ETH Main: `{ETH_MAIN_WALLET}`")
-    if SOL_MAIN_WALLET:
-        parts.append(f"• SOL Main: `{SOL_MAIN_WALLET}`")
-    if ETH_BACKUP_WALLET:
-        parts.append(f"• ETH Backup: `{ETH_BACKUP_WALLET}`")
-    if SOL_BACKUP_WALLET:
-        parts.append(f"• SOL Backup: `{SOL_BACKUP_WALLET}`")
-    parts.append("\nSend, then use /subscribe <plan> and /status.")
-    await update.message.reply_markdown("\n".join(parts))
+    # Check USDT token transfer
+    usdt_units = find_usdt_transfer_to_wallet(txhash, wallet)
+    if usdt_units is not None and usdt_units > 0:
+        paid_usdt = usdt_units / 1_000_000  # USDT 6 decimals
+        if paid_usdt + 1e-6 >= PLANS[plan_key]["usd"]:
+            return True, "USDT", f"USDT payment detected ({paid_usdt:.2f} USDT)", float(paid_usdt)
+        else:
+            return False, "USDT", "USDT amount below required plan price", float(paid_usdt)
 
-async def link_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = str(update.effective_user.id)
-    arg = " ".join(context.args).strip() if context.args else ""
+    return False, "N/A", "No ETH/USDT payment to subscription wallet found in this tx", 0.0
 
-    if not arg:
-        await update.message.reply_text("Usage: /link <ETH_or_SOL_wallet_address>")
-        return
+# -------------------------
+# Telegram Handlers
+# -------------------------
+WELCOME = "👋 Welcome to IceGods Bot! Type /help"
 
-    chain = None
-    if is_valid_eth_address(arg):
-        chain = "ETH"
-    elif is_valid_solana_address(arg):
-        chain = "SOL"
-    else:
-        await update.message.reply_text("❌ Invalid wallet address. Please send a valid **ETH (0x...)** or **Solana (base58)** address.")
-        return
+HELP = (
+    "/start - Welcome\n"
+    "/help - This help\n"
+    "/about - About\n"
+    "/plans - Subscription address & amounts\n"
+    "/subscribe <plan> - Select plan (12h, 24h, week, month, year)\n"
+    "/pay <txhash> <plan> - Verify payment and activate\n"
+    "/setwallet <address> - Save your own wallet for sweeping\n    (owner-only actions remain restricted)\n"
+    "/status - Your subscription status\n"
+)
 
-    upsert_user(tg_id, wallet_address=arg, chain=chain)
-    await update.message.reply_text(f"✅ Linked {chain} wallet:\n{arg}")
+async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(WELCOME)
 
-async def unlink_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = str(update.effective_user.id)
-    upsert_user(tg_id, wallet_address=None, chain=None)
-    await update.message.reply_text("🔓 Wallet unlinked.")
+async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(HELP)
 
-async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = str(update.effective_user.id)
-    plan = " ".join(context.args).strip().lower() if context.args else ""
+async def cmd_about(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("IceGods Bot — payment verification + subscriptions.")
+
+async def cmd_plans(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    msg = [f"Send payment to: `{SUBSCRIPTION_WALLET}`", ""]
+    for k, v in PLANS.items():
+        msg.append(f"- {k}: ${v['usd']}")
+    msg.append("\nAfter paying run: `/pay <txhash> <plan>`")
+    await update.message.reply_text("\n".join(msg), parse_mode="Markdown")
+
+async def cmd_subscribe(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not ctx.args:
+        return await update.message.reply_text("Usage: /subscribe <plan>")
+    plan = ctx.args[0].lower()
     if plan not in PLANS:
-        valid = ", ".join(sorted(PLANS.keys()))
-        await update.message.reply_text(f"Usage: /subscribe <plan>\nValid: {valid}")
-        return
-    # record start now
-    upsert_user(tg_id, plan=plan, start_time=now_ts())
-    await update.message.reply_text(f"✅ Subscription started: {plan}\nUse /status to check remaining time.")
+        return await update.message.reply_text("Unknown plan. Use: 12h, 24h, week, month, year")
+    usd = PLANS[plan]["usd"]
+    await update.message.reply_text(f"Selected {plan} (${usd}). Send ETH/USDT to {SUBSCRIPTION_WALLET} and then run:\n`/pay <txhash> {plan}`", parse_mode="Markdown")
 
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_id = str(update.effective_user.id)
-    row = get_user_row(tg_id)
-    if not row:
-        await update.message.reply_text("No record found. Try /link and /subscribe.")
+async def cmd_pay(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if len(ctx.args) < 2:
+        return await update.message.reply_text("Usage: /pay <txhash> <plan>")
+    txhash = ctx.args[0].strip()
+    plan = ctx.args[1].strip().lower()
+    user = update.effective_user
+    try:
+        ok, currency, detail, amount_usd = verify_payment(txhash, plan, SUBSCRIPTION_WALLET)
+        record_payment(txhash, user.id, plan, amount_usd, currency, int(ok))
+        if ok:
+            exp_ts = activate_subscription(user.id, user.username or "", plan)
+            exp_dt = datetime.fromtimestamp(exp_ts, tz=timezone.utc)
+            await update.message.reply_text(f"✅ Payment verified ({currency}). Plan {plan} active until {exp_dt.strftime('%Y-%m-%d %H:%M UTC')}")
+        else:
+            await update.message.reply_text(f"❌ Payment not valid: {detail}")
+    except Exception as e:
+        log.exception("cmd_pay error")
+        await update.message.reply_text(f"Error verifying payment: {e}")
+
+async def cmd_setwallet(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not ctx.args:
+        return await update.message.reply_text("Usage: /setwallet <address>")
+    wallet = ctx.args[0].strip()
+    set_user_wallet(update.effective_user.id, update.effective_user.username or "", wallet)
+    await update.message.reply_text(f"Saved wallet: `{wallet}`", parse_mode="Markdown")
+
+async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    u = get_user(update.effective_user.id)
+    if not u:
+        await update.message.reply_text("No profile set. Use /setwallet and /subscribe")
         return
-    _, wallet, chain, plan, start_time = row
-    active = is_active(start_time, plan)
-    remain = remaining_time(start_time, plan) if active else "Expired / Not active."
-    lines = [
-        f"👤 User: {tg_id}",
-        f"🔗 Wallet: {wallet or '—'}",
-        f"⛓️ Chain: {chain or '—'}",
-        f"📦 Plan: {plan or '—'}",
-        f"⏳ Active: {'Yes' if active else 'No'}",
-        f"🕒 Remaining: {remain}",
+    active = int(u.get("expires_at", 0)) > int(time.time())
+    out = [
+        f"User: @{u.get('username')}",
+        f"Wallet: {u.get('wallet')}",
+        f"Plan: {u.get('plan') or 'none'}",
+        f"Active: {'yes' if active else 'no'}",
     ]
-    await update.message.reply_text("\n".join(lines))
+    if active:
+        exp_dt = datetime.fromtimestamp(u["expires_at"], tz=timezone.utc)
+        out.append(f"Expires: {exp_dt.strftime('%Y-%m-%d %H:%M UTC')}")
+    await update.message.reply_text("\n".join(out))
 
-async def fallback_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Helpful hint on unknown text
-    await update.message.reply_text("🤖 Try /help for commands.")
+async def cmd_sweep(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return await update.message.reply_text("❌ Not authorized.")
+    # --- PLACEHOLDER ---
+    # Real sweeping requires secure signing (do NOT put private keys in your git repo)
+    await update.message.reply_text("Sweep triggered (placeholder). Use safe manual sweep flow or multisig.")
 
-# ========= MAIN =========
-def main():
-    if not TOKEN:
-        raise SystemExit("TELEGRAM_BOT_TOKEN is missing in .env")
+async def unknown_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Unknown command. /help")
 
-    app = Application.builder().token(TOKEN).build()
+# -------------------------
+# App start
+# -------------------------
+async def run_bot():
+    db_init()
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("about", cmd_about))
+    app.add_handler(CommandHandler("plans", cmd_plans))
+    app.add_handler(CommandHandler("subscribe", cmd_subscribe))
+    app.add_handler(CommandHandler("pay", cmd_pay))
+    app.add_handler(CommandHandler("setwallet", cmd_setwallet))
+    app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("sweep", cmd_sweep))
+    app.add_handler(MessageHandler(filters.COMMAND, unknown_cmd))
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("plans", plans))
-    app.add_handler(CommandHandler("address", address))
-    app.add_handler(CommandHandler("link", link_wallet))
-    app.add_handler(CommandHandler("unlink", unlink_wallet))
-    app.add_handler(CommandHandler("subscribe", subscribe))
-    app.add_handler(CommandHandler("status", status))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_text))
-
-    print(f"🤖 {APP_NAME} is running…")
-    app.run_polling()
+    log.info("Starting bot (polling)...")
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(run_bot())
+    except KeyboardInterrupt:
+        log.info("Shutting down")
+
+
