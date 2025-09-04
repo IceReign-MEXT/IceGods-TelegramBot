@@ -1,101 +1,119 @@
-import os
+0import os
+import asyncio
 import logging
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, filters
+from datetime import datetime
 
-# ---------------- Environment Variables ---------------- #
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 
-ETH_MAIN_WALLET = os.getenv("ETH_MAIN_WALLET")
-ETH_BACKUP_WALLET = os.getenv("ETH_BACKUP_WALLET")
-SOL_MAIN_WALLET = os.getenv("SOL_MAIN_WALLET")
-SOL_BACKUP_WALLET = os.getenv("SOL_BACKUP_WALLET")
+# Load env variables (Railway injects them automatically)
+TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
-INFURA_API_KEY = os.getenv("INFURA_API_KEY")
-INFURA_SECRET = os.getenv("INFURA_SECRET")
-INFURA_JWT = os.getenv("INFURA_JWT")
+ETH_MAIN_WALLET = os.environ["ETH_MAIN_WALLET"]
+ETH_BACKUP_WALLET = os.environ["ETH_BACKUP_WALLET"]
+SOL_MAIN_WALLET = os.environ["SOL_MAIN_WALLET"]
+SOL_BACKUP_WALLET = os.environ["SOL_BACKUP_WALLET"]
 
-ALCHEMY_ETH_RPC = os.getenv("ALCHEMY_ETH_RPC")
-ALCHEMY_ZKSYNC_RPC = os.getenv("ALCHEMY_ZKSYNC_RPC")
-ALCHEMY_WORLDCHAIN_RPC = os.getenv("ALCHEMY_WORLDCHAIN_RPC")
-ALCHEMY_SHAPE_RPC = os.getenv("ALCHEMY_SHAPE_RPC")
-ALCHEMY_SAPPHIRE_DEVNET = os.getenv("ALCHEMY_SAPPHIRE_DEVNET")
-
-TELEGRAM_OWNER_ID = int(os.getenv("TELEGRAM_OWNER_ID", CHAT_ID))
-
-# ---------------- Logging ---------------- #
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-# ---------------- Subscription Tiers ---------------- #
+# Subscription pricing
 SUBSCRIPTION_TIERS = {
     "12h": 15,
     "24h": 20,
     "weekly": 100,
     "monthly": 200,
-    "yearly": 1500,
+    "yearly": 1500
 }
 
-# ---------------- Bot Commands ---------------- #
+# Setup logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# --- Command Handlers ---
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("Subscription Plans", callback_data="plans")],
+        [InlineKeyboardButton("Check Status", callback_data="status")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
         "👋 Welcome to IceGods Bot!\n\n"
-        "This bot monitors wallets, protects against dust/fake tokens, and provides subscription-based sweeping.\n"
-        "Type /help to see available commands."
+        "This bot monitors wallets, protects against dust/fake tokens, "
+        "and provides subscription-based sweeping.\n\n"
+        "Type /help to see available commands.",
+        reply_markup=reply_markup
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = "📖 *Available Commands:*\n\n"
-    help_text += "/start - Welcome message\n"
-    help_text += "/help - Show this help\n"
-    help_text += "/about - About the bot\n"
-    help_text += "/plans - Subscription plans\n"
-    help_text += "/sweep - Sweep fake tokens (owner only)\n"
-    help_text += "/status - Show bot status\n"
-    await update.message.reply_text(help_text)
+    await update.message.reply_text(
+        "/start - Welcome message\n"
+        "/help - Show this help\n"
+        "/about - About the bot\n"
+        "/plans - Subscription plans\n"
+        "/sweep - Sweep fake tokens (owner only)\n"
+        "/status - Show bot status"
+    )
 
 async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    about_text = (
+    await update.message.reply_text(
         "⚡ IceGods Bot v1.1\n\n"
         "✅ Dust & scam protection\n"
         "✅ Multi-chain monitoring\n"
         "✅ Subscription sweeping\n"
         "✅ Dashboard integration coming soon"
     )
-    await update.message.reply_text(about_text)
 
 async def plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = "💰 *Subscription Plans:*\n"
-    for plan, price in SUBSCRIPTION_TIERS.items():
-        text += f"{plan} → ${price} in USDT/ETH\n"
-    await update.message.reply_text(text)
+    message = "💰 *Subscription Plans:*\n"
+    for tier, price in SUBSCRIPTION_TIERS.items():
+        message += f"{tier} Plan → ${price}\n"
+    await update.message.reply_text(message)
 
 async def sweep(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != TELEGRAM_OWNER_ID:
+    # Only owner can use
+    if str(update.effective_user.id) != TELEGRAM_CHAT_ID:
         await update.message.reply_text("❌ You are not authorized to use this command.")
         return
-    await update.message.reply_text("🧹 Sweeping fake tokens... (placeholder logic)")
+    await update.message.reply_text("Sweeping tokens... ✅")
+    # TODO: Add sweeping logic
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Bot is online and running smoothly!")
 
-# ---------------- Main ---------------- #
-def main():
-    application = Application.builder().token(BOT_TOKEN).build()
+# --- Callback Query Handler for Inline Buttons ---
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.data == "plans":
+        await plans(update, context)
+    elif query.data == "status":
+        await status(update, context)
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("about", about))
-    application.add_handler(CommandHandler("plans", plans))
-    application.add_handler(CommandHandler("sweep", sweep))
-    application.add_handler(CommandHandler("status", status))
+# --- Main Application ---
+async def main():
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    logger.info("✅ Bot starting...")
-    application.run_polling()
+    # Command handlers
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("about", about))
+    app.add_handler(CommandHandler("plans", plans))
+    app.add_handler(CommandHandler("sweep", sweep))
+    app.add_handler(CommandHandler("status", status))
+
+    # Inline button handler
+    app.add_handler(CallbackQueryHandler(button_handler))
+
+    # Run the bot
+    logger.info("Bot is starting...")
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    await app.idle()
+    await app.shutdown()
 
 if __name__ == "__main__":
-    main()
-
+    asyncio.run(main())
