@@ -1,4 +1,17 @@
+<<<<<<< HEAD
 0import os
+=======
+#!/usr/bin/env python3
+from dotenv import load_dotenv
+import os
+
+load_dotenv()  # loads .env variables
+
+import os
+import sqlite3
+import time
+import logging
+>>>>>>> 1d43a98 (Prepare IceGodWatcherBot for deployment: webhook, DB, migration)
 import asyncio
 import logging
 from datetime import datetime
@@ -15,6 +28,7 @@ ETH_BACKUP_WALLET = os.environ["ETH_BACKUP_WALLET"]
 SOL_MAIN_WALLET = os.environ["SOL_MAIN_WALLET"]
 SOL_BACKUP_WALLET = os.environ["SOL_BACKUP_WALLET"]
 
+<<<<<<< HEAD
 # Subscription pricing
 SUBSCRIPTION_TIERS = {
     "12h": 15,
@@ -22,6 +36,22 @@ SUBSCRIPTION_TIERS = {
     "weekly": 100,
     "monthly": 200,
     "yearly": 1500
+=======
+if not BOT_TOKEN:
+    raise SystemExit("BOT_TOKEN missing in .env")
+if not SUBSCRIPTION_WALLET:
+    raise SystemExit("SUBSCRIPTION_WALLET missing in .env")
+if not ETHERSCAN_API_KEY:
+    raise SystemExit("ETHERSCAN_API_KEY missing in .env")
+
+# Pricing
+PLANS = {
+    "12h":  {"usd": 10,  "hours": 12},
+    "24h":  {"usd": 15,  "hours": 24},
+    "week": {"usd": 80,  "hours": 100 * 24},
+    "month":{"usd": 150,  "hours": 250 * 24},
+    "year": {"usd": 1500, "hours": 2000 * 24},
+>>>>>>> 1d43a98 (Prepare IceGodWatcherBot for deployment: webhook, DB, migration)
 }
 
 # Setup logging
