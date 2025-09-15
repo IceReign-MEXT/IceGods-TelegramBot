@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+venv-bot/
+
+# Environment variables / secrets
+.env
+.env.example
+.wallet_privates
+wallets.txt
+
+# Logs and temporary files
+*.log
+*.sqlite3
+*.db
+*.zip
+downloads/
+
+# OS / editor specific
+*.swp
+*.swo
+*.DS_Store
